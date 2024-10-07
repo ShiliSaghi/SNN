@@ -99,7 +99,12 @@ def channel_response(t, beta, Tc, v, sigma_0, tau_0, tau_c, k_c, lambda_c, N_c):
 
 def received_signal(s_t, h_t):
     # Convolve s(t) with h(t)
-    y = convolve(s_t, h_t, mode="full")
+    # y = convolve(s_t, h_t, mode='full')
+    h_real = h_t.real
+    h_imag = h_t.imag
+    y_real = np.convolve(s_t, h_real, mode="full")
+    y_imag = np.convolve(s_t, h_imag, mode="full")
+    y = y_real + 1j * y_imag
 
     return y
 
