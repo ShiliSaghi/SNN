@@ -4,6 +4,16 @@ from scipy.signal import convolve
 import config
 
 
+#np.random.seed(42) #For having fixed values every time the code is run.
+
+
+def generate_complex_gaussian(n, mean, variance):
+    real_part = np.random.normal(mean, np.sqrt(variance / 2), n)  
+    imag_part = np.random.normal(mean, np.sqrt(variance / 2), n)  
+
+    return real_part + 1j * imag_part  
+
+
 def rrc_pulse(t, beta, Tc):
     phi_t = np.zeros_like(t)
 
@@ -27,9 +37,9 @@ def rrc_pulse(t, beta, Tc):
 
 def generate_s_t(t, T, L, x, Lb, Tc, beta):
 
-    # s_t = np.zeros_like(t)
-    s_i = np.zeros((2 * Lb * len(t)))
-
+    # s_i = np.zeros((2 * Lb * len(t)))
+    s_i = np.zeros(len(t))
+    
     # Loop in each time slot
     for l in range(len(x)):
         if x[l]:
@@ -37,184 +47,161 @@ def generate_s_t(t, T, L, x, Lb, Tc, beta):
         else:
             s_i[l * 2 * Lb] = 1.0
 
-        # shift_time = ((l - 1) * T) + x[l - 1] * Lb * Tc
-        # pulse_time = t - shift_time
-        # phi_t = rrc_pulse(pulse_time, beta, Tc)
-        # if l == 1:
-        #     plt.figure(1, figsize=(10, 6))
-        #     plt.subplot(2, 1, 1)
-        #     plt.plot(pulse_time, phi_t)
-        #     plt.title("φ(t)")
-        #     plt.ylabel("Amp")
-        #     plt.grid(True)
-
-        # # Summation of φ(t - ...)
-        # s_t += phi_t
-
-    upsample = 8
-    s_t_prime = np.zeros((len(s_i) * upsample))
-    s_t_prime[::upsample] = s_i
+    s_t_prime = np.zeros((len(s_i) * config.upsample))
+    s_t_prime[::config.upsample] = s_i
 
     pulse_length = 62
-    time = np.arange(-pulse_length + 1, pulse_length) * T / (2 * Lb * upsample)
-    phi_t = rrc_pulse(time, beta, T / (2 * Lb))
-
-    # plt.plot(phi_t)
+    time = np.arange(-pulse_length + 1, pulse_length) * T / (2 * Lb * config.upsample)
+    phi_t = rrc_pulse(time, beta, T / (2 * Lb)) # Tc = T/2lb
+    # plt.figure(1)
+    # plt.plot(time, phi_t)
     # plt.show()
 
     s_t = np.convolve(s_t_prime, phi_t, "same")
 
-    # plt.stem(np.arange(len(s_i)), s_i)
-    # plt.plot(np.arange(len(s_i) * upsample) / upsample, s_t, "r")
-    # plt.show()
+    plt.figure()
+    plt.title("s(i)/s(t)")
+    plt.stem(np.arange(len(s_i)), s_i, label="s(i)", basefmt='b-')
+    plt.plot(np.arange(len(s_i) * config.upsample) / config.upsample, s_t, "r", label="s(t)")
+    plt.legend(loc='upper right')
+    plt.show()
 
     return t, s_t
 
 
-def channel_response(t, beta, Tc, v, sigma_0, tau_0, tau_c, k_c, lambda_c, N_c):
+def channel_response(beta, Tc, v, sigma_0, tau_0, tau_c, Nc):
 
-    h_t = np.zeros_like(t, dtype=complex)
+    beta_0 = generate_complex_gaussian(1, mean = 0, variance = 1)
+    beta_c = generate_complex_gaussian(Nc, mean = 0, variance = sigma_0)
+    print("B0: ", beta_0)
+    print("Bc: ", beta_c)
 
-    beta_0 = np.sqrt(sigma_0 / 2) * (
-        np.random.randn() + 1j * np.random.randn()
-    )  # β0 ∼ CN(0,σ2)
-
-    beta_c = np.sqrt(lambda_c * (np.random.weibull(k_c, N_c)) / 2) * np.exp(
-        1j * 2 * np.pi * np.random.rand(N_c)
-    )  # the amp of Nc clutters which are independent with uniform phases and Weibull absolute values
-    # the amplitudes {βc }Nc are all i.i.d. βc ∼ CN(0,1) variable ???
-
+    pulse_length = 62
+    time = np.arange(-pulse_length + 1, pulse_length) * config.T / (2 * config.Lb * config.upsample)
+    shift_time = time - tau_0                 #tau_0 = 0
+    g_t_0 = rrc_pulse(-shift_time, beta, Tc)  # Tc = T/2lb
+    
+    v=1
+    h_t_target = np.zeros(len(g_t_0))
     if v == 1:
-        shift_time = t - tau_0
-        g_t = rrc_pulse(-shift_time, beta, Tc)
-        h_t = beta_0 * g_t
+        h_t_target = beta_0 * g_t_0
+        print("len(h_t_target)", len(h_t_target))
 
-    for c in range(N_c):
-        shift_time_c = t - tau_c[c]
-        g_t_c = rrc_pulse(-shift_time_c, beta, Tc)
-        h_t += beta_c[c] * g_t_c
+    plt.figure()
+    plt.title("h(t)_target")
+    plt.plot(h_t_target,'g')
+    # plt.show()
 
+    # for c in range(N_c):
+    #     shift_time_c = t - tau_c[c]
+    #     g_t_c = rrc_pulse(-shift_time_c, beta, Tc)
+    #     h_t += beta_c[c] * g_t_c
+
+
+    # new code-----------------------
+    g_t_c = rrc_pulse(-time, beta, Tc)
+
+    ls = np.linspace(0, 4*config.Tc, 2 * config.Lb * Nc) #20
+    bc_sig = np.zeros(len(ls), dtype=complex)
+    # print("ls: ", ls)
+    
+    matched_ls_index = []
+    matched_tau_index = []
+    used_ls_index = []
+
+    for i, tau in enumerate(tau_c): #find the the closest index value in ls which matches tau
+
+        sorted_index = np.argsort(np.abs(ls - tau)) #sort indexes of min differences (in ascending order)
+
+        for min_index in sorted_index:
+
+            if min_index not in used_ls_index:
+                matched_ls_index.append(min_index)
+                matched_tau_index.append(i)
+                used_ls_index.append(min_index) # mark min_index as used
+                break
+
+    for ls_idx, tau_idx in zip(matched_ls_index, matched_tau_index):
+        bc_sig[ls_idx] = beta_c[tau_idx]
+        # tau_c[tau_idx] = -1
+        # print(f"tau_c[{tau_idx}] = {tau_c[tau_idx]} is closest to ls[{ls_idx}] = {ls[ls_idx]}")
+
+    bc_sig_prime = np.zeros ((len(bc_sig) * config.upsample), dtype=complex) #160
+    bc_sig_prime[::config.upsample] = bc_sig
+    
+    plt.figure()
+    plt.title("bc_sig_prime")
+    plt.stem(bc_sig_prime, basefmt='b-')
+    # plt.show()
+   
+    h_t_clutter = np.convolve(bc_sig_prime, g_t_c,"same")
+    print("len(h_t_clutter): ", len(h_t_clutter))
+
+    plt.figure()
+    plt.title("h(t)_clutter")
+    plt.stem(np.arange(len(bc_sig)), bc_sig, label="bc_sig", basefmt='b-')
+    plt.plot(np.arange(len(bc_sig) * config.upsample) / config.upsample, h_t_clutter, "r", label="h(t)_clutter")
+    plt.legend()
+    # plt.show()
+    
+    #Match the lengths of both parts of the h(t) signal
+    max_len = max(len(h_t_target), len(h_t_clutter))
+    h_t_target_padded = np.pad(h_t_target, (0, max_len - len(h_t_target)), 'constant')
+    h_t_clutter_padded = np.pad(h_t_clutter, (0, max_len - len(h_t_clutter)), 'constant')
+
+    h_t = h_t_target_padded + h_t_clutter_padded
+    print("len(h_t): ", len(h_t))
+
+    plt.figure()
+    plt.title("h(t)")
+    plt.plot(h_t_target_padded,'g', label="h(t)_target")
+    plt.plot(h_t_clutter, 'r', label="h(t)_clutter")
+    plt.plot(h_t, 'b', label="h(t)")
+    plt.legend()
+    plt.show()
+   
     return h_t
 
 
 def received_signal(s_t, h_t):
-    # Convolve s(t) with h(t)
-    # y = convolve(s_t, h_t, mode='full')
-    h_real = h_t.real
-    h_imag = h_t.imag
-    y_real = np.convolve(s_t, h_real, mode="full")
-    y_imag = np.convolve(s_t, h_imag, mode="full")
-    y = y_real + 1j * y_imag
+    
+    y = convolve(s_t, h_t, mode='full')
+
+    # h_real = h_t.real
+    # h_imag = h_t.imag
+    # y_real = np.convolve(s_t, h_real, mode="full")
+    # y_imag = np.convolve(s_t, h_imag, mode="full")
+    # y = y_real + 1j * y_imag
 
     return y
 
 
+
+#--main--
 # Create signals----------
+t, s_t = generate_s_t(
+    config.t, config.T, config.L, config.x, config.Lb, config.Tc, config.beta
+)
+
+
 h_t = channel_response(
-    config.t,
     config.beta,
     config.Tc,
     config.v,
     config.sigma_0,
     config.tau_0,
     config.tau_c,
-    config.k_c,
-    config.lambda_c,
     config.Nc,
 )
-print("length of h(t):", len(h_t))
 
-plt.plot(np.abs(h_t))
-plt.show()
-
-t, s_t = generate_s_t(
-    config.t, config.T, config.L, config.x, config.Lb, config.Tc, config.beta
-)
-print("length of s(t):", len(s_t))
 
 y_t = received_signal(s_t, h_t)
 print("length of y(t):", len(y_t))
 time_y = np.arange(len(y_t))
 
-
-# Add noise to y(t)--------
-N0 = 0.1  # power spectral density
-B = 1 / config.Tc  # Pulse bandwidth
-num_noise_samples = len(y_t)
-z = np.random.normal(0, np.sqrt(N0 * B), num_noise_samples) + 1j * np.random.normal(
-    0, np.sqrt(N0 * B), num_noise_samples
-)
-y_noisy = y_t + z
-
-
-# Sampling y(t) to obtain yi based on Tc----
-num_samples_to_take = 2 * config.Lb * config.L  # total number of samples
-sample_indexes = (
-    np.arange(1, num_samples_to_take + 1) * config.Tc
-)  # array of sampling indexes with Tc intervals
-yi_indexes = (sample_indexes / (config.T / config.sps)).astype(
-    int
-)  # convert sample indexes to the corresponding indexes in y_t
-yi = y_noisy[yi_indexes]
-
-
-# Create yl, a list vector to hold samples for each time slot(l)----
-yl = []
-for l in range(1, config.L + 1):
-    start_index = (l - 1) * 2 * config.Lb
-    end_index = 2 * l * config.Lb
-    samples_for_slot = yi[start_index:end_index]
-    yl.append(samples_for_slot)
-
-
-print("Length of yi:", len(yi))
-print("Length of yl (number of slots):", len(yl))  # should be L=80
-print(
-    "Samples for first slot (y1):", yl[0]
-)  # just for test and checking the first slot
-
-
-# Plot s(t)---------------
-plt.figure(1, figsize=(10, 6))
-plt.subplot(2, 1, 2)
-plt.plot(t, s_t)
-bar_width = config.T / 4
-x_positions = np.arange(1, len(config.x) + 1) * config.T  # Position for each slot
-plt.bar(
-    x_positions - bar_width / 2,
-    config.x,
-    width=bar_width,
-    color="red",
-    alpha=0.8,
-    label="Bit Vector x",
-)  # bar chart for bit vector x
-
-plt.title("s(t) with bit vector x")
-plt.title("S(t)")
-plt.xlabel("Time")
-plt.ylabel("Amp")
-plt.legend()
-plt.grid(True)
-
-
-# Plot h(t)---------------
-# --------------real------
-plt.figure(2, figsize=(10, 6))
-plt.subplot(2, 1, 1)
-plt.plot(config.t, h_t.real)
-plt.title("h(t)_Real")
-plt.ylabel("Amplitude")
-plt.grid(True)
-# --------imaginary-------
-plt.subplot(2, 1, 2)
-plt.plot(config.t, h_t.imag)
-plt.title("h(t)_Imaginary")
-plt.ylabel("Amplitude")
-plt.grid(True)
-
 # Plot y(t)---------------
 # --------------real------
-plt.figure(3, figsize=(10, 6))
+plt.figure(7, figsize=(10, 6))
 plt.subplot(2, 1, 1)
 plt.plot(time_y, y_t.real)
 plt.title("y(t)_Real")
@@ -227,24 +214,103 @@ plt.title("y(t)_Imaginary")
 plt.xlabel("Time")
 plt.ylabel("Amplitude")
 plt.grid(True)
-
-
-# Plot yi-------------------
-# --------------real------
-plt.figure(4, figsize=(10, 6))
-plt.subplot(2, 1, 1)
-plt.stem(np.arange(len(yi)), yi.real, basefmt=" ", use_line_collection=True)
-plt.title("yi_Real")
-plt.ylabel("Value")
-plt.grid(True)
-# -------------imaginary--
-plt.subplot(2, 1, 2)
-plt.stem(np.arange(len(yi)), yi.imag, basefmt=" ", use_line_collection=True)
-plt.title("yi_Imaginary")
-plt.xlabel("Time")
-plt.ylabel("Value")
-plt.grid(True)
-
-
-plt.tight_layout()
 plt.show()
+
+
+
+# Add noise to y(t)--------
+N0 = 0.1  # power spectral density
+B = 1 / config.Tc  # Pulse bandwidth
+num_noise_samples = len(y_t)
+z = np.random.normal(0, np.sqrt(N0 * B), num_noise_samples) + 1j * np.random.normal(
+    0, np.sqrt(N0 * B), num_noise_samples
+)
+y_noisy = y_t + z
+
+
+
+# # Sampling y(t) to obtain yi based on Tc----
+# num_samples_to_take = 2 * config.Lb * config.L  # total number of samples
+# sample_indexes = (
+#     np.arange(1, num_samples_to_take + 1) * config.Tc
+# )  # array of sampling indexes with Tc intervals
+# yi_indexes = (sample_indexes / (config.T / config.sps)).astype(
+#     int
+# )  # convert sample indexes to the corresponding indexes in y_t
+# # yi = y_noisy[yi_indexes]
+
+
+# Create yl, a list vector to hold samples for each time slot(l)----
+# yl = []
+# for l in range(1, config.L + 1):
+#     start_index = (l - 1) * 2 * config.Lb
+#     end_index = 2 * l * config.Lb
+#     samples_for_slot = yi[start_index:end_index]
+#     yl.append(samples_for_slot)
+
+
+# print("Length of yi:", len(yi))
+# print("Length of yl (number of slots):", len(yl))  # should be L=80
+# print(
+#     "Samples for first slot (y1):", yl[0]
+# )  # just for test and checking the first slot
+
+
+# # Plot s(t)---------------
+# plt.figure(1, figsize=(10, 6))
+# plt.subplot(2, 1, 2)
+# plt.plot(t, s_t)
+# bar_width = config.T / 4
+# x_positions = np.arange(1, len(config.x) + 1) * config.T  # Position for each slot
+# plt.bar(
+#     x_positions - bar_width / 2,
+#     config.x,
+#     width=bar_width,
+#     color="red",
+#     alpha=0.8,
+#     label="Bit Vector x",
+# )  # bar chart for bit vector x
+
+# plt.title("s(t) with bit vector x")
+# plt.title("S(t)")
+# plt.xlabel("Time")
+# plt.ylabel("Amp")
+# plt.legend()
+# plt.grid(True)
+
+
+# # Plot h(t)---------------
+# # --------------real------
+# plt.figure(2, figsize=(10, 6))
+# plt.subplot(2, 1, 1)
+# plt.plot(config.t, h_t.real)
+# plt.title("h(t)_Real")
+# plt.ylabel("Amplitude")
+# plt.grid(True)
+# # --------imaginary-------
+# plt.subplot(2, 1, 2)
+# plt.plot(config.t, h_t.imag)
+# plt.title("h(t)_Imaginary")
+# plt.ylabel("Amplitude")
+# plt.grid(True)
+
+
+# # Plot yi-------------------
+# # --------------real------
+# plt.figure(4, figsize=(10, 6))
+# plt.subplot(2, 1, 1)
+# plt.stem(np.arange(len(yi)), yi.real, basefmt=" ", use_line_collection=True)
+# plt.title("yi_Real")
+# plt.ylabel("Value")
+# plt.grid(True)
+# # -------------imaginary--
+# plt.subplot(2, 1, 2)
+# plt.stem(np.arange(len(yi)), yi.imag, basefmt=" ", use_line_collection=True)
+# plt.title("yi_Imaginary")
+# plt.xlabel("Time")
+# plt.ylabel("Value")
+# plt.grid(True)
+
+
+# plt.tight_layout()
+# plt.show()
