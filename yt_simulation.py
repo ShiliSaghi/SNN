@@ -99,7 +99,7 @@ def channel_response(beta, Tc, v, sigma_0, tau_0, tau_c, Nc):
 
     h_t = np.zeros(config.channel_samples)
 
-    upsampled_time = np.arange(len(h_t)) * (Tc / (2 * config.Lb * config.upsample))
+    upsampled_time = np.arange(len(h_t)) * (Tc / (config.upsample))
 
     # generate the delays
     tau_0 = config.tau_0
@@ -112,8 +112,8 @@ def channel_response(beta, Tc, v, sigma_0, tau_0, tau_c, Nc):
 
     # h_t = np.convolve(h_t, phi_rx, "same")
 
-    plt.plot((Tc / config.upsample) * np.arange(len(h_t)), np.abs(h_t))
-    plt.show()
+    # plt.plot((Tc / config.upsample) * np.arange(len(h_t)), np.abs(h_t))
+    # plt.show()
 
     # pulse_length = 62
     # time = (
@@ -231,10 +231,18 @@ def received_signal(s_t, h_t):
 
 def sample_received_signal(y, h):
     first_nonzero = np.argwhere(np.abs(h))[0][0]
+    # plt.plot(
+    #     np.arange(len(y[first_nonzero:])) / config.upsample,
+    #     y[first_nonzero:].real,
+    #     "k--",
+    # )
     y = y[first_nonzero :: config.upsample]
-    plt.plot(np.abs(h))
-    plt.title(first_nonzero)
-    plt.show()
+    # plt.plot(np.abs(h))
+    # plt.title(first_nonzero)
+    # plt.show()
+    # plt.stem(y.real)
+
+    # plt.show()
     return y
 
 
@@ -294,6 +302,7 @@ z = np.random.normal(0, np.sqrt(N0 * B), num_noise_samples) + 1j * np.random.nor
 y_noisy = y_t + z
 
 y_sampled = sample_received_signal(y_noisy, h_t)
+
 
 # # Sampling y(t) to obtain yi based on Tc----
 # num_samples_to_take = 2 * config.Lb * config.L  # total number of samples

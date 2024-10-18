@@ -3,7 +3,7 @@ import numpy as np
 B = 400e6
 # parameters initialization---------
 L = 80  # number of slots
-Lb = 2  # Bandwidth factor, in paper Lb ∈ [1,6]
+Lb = 4  # Bandwidth factor, in paper Lb ∈ [1,6]
 Tc = 1 / B  # chip time, symbol duration ???
 T = 2 * Lb * Tc  # Time slot duration: 2
 beta = 0.25  # roll-off factor-(rrc) ???
