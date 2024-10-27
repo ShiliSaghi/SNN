@@ -4,12 +4,12 @@ B = 400e6
 # parameters initialization---------
 L = 80  # number of slots
 Lb = 4  # Bandwidth factor, in paper Lb ∈ [1,6]
-Tc = 1 / B  # chip time, symbol duration ???
-T = 2 * Lb * Tc  # Time slot duration: 2
-beta = 0.25  # roll-off factor-(rrc) ???
+Tc = 1 / B  # chip time
+T = 2 * Lb * Tc  # Time slot duration: 2 * 4 / 400e6 = 0.02e-6
+beta = 0.25  # roll-off factor-(rrc)
 t = np.linspace(
     0, L * T, L * 2 * Lb
-)  # Time vector: MaxTime: L * T = 80 * 1 = 80, No of samples: L * 2 * Lb = 80*2*2=320
+)  # Time vector: MaxTime: L * T = 80 * 0.02e-6 = 1.6e-6, No of samples: L * 2 * Lb = 80*2*4=640
 x = np.random.binomial(n=1, p=0.5, size=L)  # np.random.randint(0, 2, L), x ∈ {0,1}
 v = np.random.binomial(n=1, p=0.5)  # Target presence: Bernoulli(0.5)
 upsample = 8
