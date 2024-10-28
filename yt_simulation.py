@@ -116,6 +116,12 @@ def sample_received_signal(y, h):
     #     y[first_nonzero:].real,
     #     "k--",
     # )
+
+    # Calculate if padding is needed
+    if (len(y) - first_nonzero) % config.upsample != 0:
+        padding_length = config.upsample - ((len(y) - first_nonzero) % config.upsample)
+        y = np.pad(y, (0, padding_length), mode='constant')
+        
     y = y[first_nonzero :: config.upsample]
     # plt.plot(np.abs(h))
     # plt.title(first_nonzero)
