@@ -1,3 +1,4 @@
+import csv
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
@@ -46,6 +47,12 @@ def generate_s_t(t, T, L, x, Lb, Tc, beta):
         else:
             s_i[l * 2 * Lb] = 1.0
 
+    print("length of s_i:", len(s_i))
+    s_i_2D = s_i.reshape(80,8)
+    print("shape s_i_2D:", s_i_2D.shape)
+    s_i_reshape = complex_to_real_vector(s_i_2D)
+    print("shape s_i_reshape:", s_i_reshape.shape)
+
     s_t_prime = np.zeros((len(s_i) * config.upsample))
     s_t_prime[:: config.upsample] = s_i
 
@@ -58,24 +65,24 @@ def generate_s_t(t, T, L, x, Lb, Tc, beta):
         / (1 - (2 * beta * time / Ts) ** 2 + 1e-8)
     ).astype(complex)
 
-    plt.figure(1)
-    plt.stem(time, phi_t)
-    plt.grid()
-    plt.show()
+    # plt.figure(1)
+    # plt.stem(time, phi_t)
+    # plt.grid()
+    # plt.show()
 
     s_t = np.convolve(s_t_prime, phi_t, "same")
 
-    plt.figure()
-    plt.title("s(i)/s(t)")
-    plt.stem(Tc * np.arange(len(s_i)), s_i, label="s(i)", basefmt="b-")
-    plt.plot(
-        (Tc / config.upsample) * np.arange(len(s_i) * config.upsample),
-        s_t,
-        "r",
-        label="s(t)",
-    )
-    plt.legend(loc="upper right")
-    plt.show()
+    # plt.figure()
+    # plt.title("s(i)/s(t)")
+    # plt.stem(Tc * np.arange(len(s_i)), s_i, label="s(i)", basefmt="b-")
+    # plt.plot(
+    #     (Tc / config.upsample) * np.arange(len(s_i) * config.upsample),
+    #     s_t,
+    #     "r",
+    #     label="s(t)",
+    # )
+    # plt.legend(loc="upper right")
+    # plt.show()
 
     return t, s_t
 
@@ -96,10 +103,10 @@ def channel_response(beta, Tc, v, sigma_0, tau_0, tau_c, Nc):
     tau_c = config.tau_c
     tau_0_dis = np.digitize(tau_0, upsampled_time)
     tau_c_dis = np.digitize(tau_c, upsampled_time)
-
-    h_t[tau_0_dis] = beta_0
+    
+    h_t[tau_0_dis] = v * beta_0
     h_t[tau_c_dis] = beta_c
-
+    
     return h_t
 
 
@@ -117,12 +124,18 @@ def sample_received_signal(y, h):
     #     "k--",
     # )
 
+    # print("!!!!!!!!!!!!!!!!!!", (len(y) - first_nonzero) % config.upsample)
     # Calculate if padding is needed
-    if (len(y) - first_nonzero) % config.upsample != 0:
-        padding_length = config.upsample - ((len(y) - first_nonzero) % config.upsample)
-        y = np.pad(y, (0, padding_length), mode='constant')
+    # if (len(y) - first_nonzero) % config.upsample != 0:
+    #     padding_length = config.upsample - ((len(y) - first_nonzero) % config.upsample)
+    #     y = np.pad(y, (0, padding_length), mode='constant')
         
     y = y[first_nonzero :: config.upsample]
+    # Calculate if padding is needed
+    if len(y) % config.upsample != 0:
+        padding_length = config.upsample - len(y) % config.upsample
+        y = np.pad(y, (0, padding_length), mode='constant')
+        
     # plt.plot(np.abs(h))
     # plt.title(first_nonzero)
     # plt.show()
@@ -137,95 +150,140 @@ def complex_to_real_vector(yl):
     for row in yl:
         real_part = row.real
         imag_part = row.imag
-        row_concat = np.concatenate((real_part,imag_part)).reshape(16, 1)
+        row_concat = np.concatenate((real_part,imag_part)).reshape(16)
 
         y_mapped.append(row_concat)
     
     return np.array(y_mapped)
 
 
+def generate_y(x, v):
 
-# --main------------------
-# Create signals---
-t, s_t = generate_s_t(
-    config.t, config.T, config.L, config.x, config.Lb, config.Tc, config.beta
-)
-print("length of s(t):", len(s_t))
+    # Create signals---
+    t, s_t = generate_s_t(
+        config.t, config.T, config.L, config.x, config.Lb, config.Tc, config.beta
+    )
+    print("length of s(t):", len(s_t))  
 
+    h_t = channel_response(
+        config.beta,
+        config.Tc,
+        v,
+        config.sigma_0,
+        config.tau_0,
+        config.tau_c,
+        config.Nc,
+    )
+    print("length of h(t):", len(h_t))
 
+    y_t = received_signal(s_t, h_t)
+    print("length of y(t):", len(y_t))
+    time_y = np.arange(len(y_t))
 
-h_t = channel_response(
-    config.beta,
-    config.Tc,
-    config.v,
-    config.sigma_0,
-    config.tau_0,
-    config.tau_c,
-    config.Nc,
-)
-print("length of h(t):", len(h_t))
+    # plt.plot((config.Tc / config.upsample) * np.arange(len(s_t)), s_t.real, label = "s(t)")
+    # plt.plot((config.Tc / config.upsample) * np.arange(len(h_t)), np.abs(h_t), label = "h(t)")
+    # plt.plot((config.Tc / config.upsample) * np.arange(len(y_t)), y_t.real, label = "y(t)")
+    # plt.legend()
+    # plt.show()
 
+    # Add noise to y(t)--------
+    Eb = 1
+    SNR = 10  # SNR is given 10 dB
+    squared_norm_h = np.abs(h_t) ** 2  #|h|^2
+    average_squared_norm_h = np.mean(squared_norm_h)
+    N0B = (average_squared_norm_h * Eb) / SNR
+    print(f"_____N0B: {N0B}")
 
+    num_noise_samples = len(y_t)
+    z = np.random.normal(0, np.sqrt(N0B), num_noise_samples) + 1j * np.random.normal(0, np.sqrt(N0B), num_noise_samples)
+    y_noisy = y_t + z
+    print("length of y_noisy:", len(y_noisy))
 
-y_t = received_signal(s_t, h_t)
-print("length of y(t):", len(y_t))
-time_y = np.arange(len(y_t))
-
-plt.plot((config.Tc / config.upsample) * np.arange(len(s_t)), s_t.real, label = "s(t)")
-plt.plot((config.Tc / config.upsample) * np.arange(len(h_t)), np.abs(h_t), label = "h(t)")
-plt.plot((config.Tc / config.upsample) * np.arange(len(y_t)), y_t.real, label = "y(t)")
-plt.legend()
-plt.show()
-
-
-
-# Add noise to y(t)--------
-Eb = 1
-SNR = 10  # SNR is given 10 dB
-squared_norm_h = np.abs(h_t) ** 2  #|h|^2
-average_squared_norm_h = np.mean(squared_norm_h)
-
-N0B = (average_squared_norm_h * Eb) / SNR
-print(f"_____N0B: {N0B}")
-
-num_noise_samples = len(y_t)
-z = np.random.normal(0, np.sqrt(N0B), num_noise_samples) + 1j * np.random.normal(0, np.sqrt(N0B), num_noise_samples)
-y_noisy = y_t + z
-
-#Plot y_noisy---------------
-#real-------
-plt.figure(8, figsize=(10, 6))
-plt.subplot(2, 1, 1)
-plt.plot(y_noisy.real)
-plt.title("y_noisy_Real")
-#imaginary---
-plt.subplot(2, 1, 2)
-plt.plot(y_noisy.imag)
-plt.title("y_noisy_Imaginary")
-plt.xlabel("Time")
-# plt.show()
+    # #Plot y_noisy---------------
+    # #real-------
+    # plt.figure(8, figsize=(10, 6))
+    # plt.subplot(2, 1, 1)
+    # plt.plot(y_noisy.real)
+    # plt.title("y_noisy_Real")
+    # #imaginary---
+    # plt.subplot(2, 1, 2)
+    # plt.plot(y_noisy.imag)
+    # plt.title("y_noisy_Imaginary")
+    # plt.xlabel("Time")
+    # # plt.show()
 
 
+    # Sampling of y(t)-----------
+    y_sampled = sample_received_signal(y_noisy, h_t)
+    print("length of y-sampled(i): ", len(y_sampled))
+    # #Plot y_sampled---------------
+    # #real-------
+    # plt.figure(8, figsize=(10, 6))
+    # plt.subplot(2, 1, 1)
+    # plt.plot(y_sampled.real)
+    # plt.title("y_noisy_Real")
+    # #imaginary---
+    # plt.subplot(2, 1, 2)
+    # plt.plot(y_sampled.imag)
+    # plt.title("y_noisy_Imaginary")
+    # plt.xlabel("Time")
+    # # plt.show()
 
-# Sampling of y(t)-----------
-y_sampled = sample_received_signal(y_noisy, h_t)
-print("length of y-sampled(i): ", len(y_sampled))
+    yl = y_sampled.reshape(config.L, 2*config.Lb)
+    print("yl(i) shape: ", yl.shape)
+    # print(yl)
+    yl_mapped = complex_to_real_vector(yl)
+    print("yl_mapped shape: ", yl_mapped.shape)
+    # print(yl_mapped)
 
-yl = y_sampled.reshape(config.L, 2*config.Lb)
-print("yl(i) shape: ", yl.shape)
-# print(yl)
-yl_mapped = complex_to_real_vector(yl)
-print("yl_mapped shape: ", yl_mapped.shape)
-# print(yl_mapped)
+    # yl_mapped_real = yl_mapped[:, :8].real.flatten()
+    # plt.figure(figsize=(10, 3))
+    # plt.plot(yl_mapped_real)
+    # plt.title("Real Parts of All Rows in yl_mapped")
+    # plt.show()
 
-yl_mapped_real = yl_mapped[:, :8, 0].real.flatten()
-plt.figure(figsize=(10, 3))
-plt.plot(yl_mapped_real)
-plt.title("Real Parts of All Rows in yl_mapped")
-plt.show()
+    return yl_mapped
 
 
 
+# -----------------main------------------
+num_round = 5 #100000
+multiple_tuples=[]
+
+for r in range(num_round):
+    x = np.random.binomial(n=1, p=0.5, size=config.L)  # np.random.randint(0, 2, L), x ∈ {0,1}
+    v = np.random.binomial(n=1, p=0.5)  # Target presence: Bernoulli(0.5)
+    y = generate_y(x, v)
+
+    print("round# :", r, "\n v : ", v)
+    x_reshape= np.zeros((80,16))
+    x_reshape[:, 0]= config.x
+    #print("x_reshape: ", x_reshape.shape)
+
+    multiple_tuples.append((y,x_reshape,v))
+
+# # Print each tuple---
+# for i, t in enumerate(multiple_tuples):
+#     print(f"Tuple {i + 1}:")
+#     print(f"y (shape {t[0].shape}):\n{t[0]}")
+#     print(f"x (shape {t[1].shape}):\n{t[1]}")
+#     print(f"v: {t[2]}\n")
+    
+
+#Create dataset---------------
+with open("./dataset.csv", "w", newline="") as f:
+    writer = csv.writer(f)
+    for y, x, v in multiple_tuples:
+        writer.writerow([y.tolist() if hasattr(y, "tolist") else y,
+                         x.tolist() if hasattr(x, "tolist") else x,
+                         v])
+
+# Load from the CSV file (basic loading; adjust as needed)
+with open("./dataset.csv", "r") as f:
+    reader = csv.reader(f)
+    loaded_tuples = [row for row in reader]
+
+print(loaded_tuples[7:11])
 
 
 
