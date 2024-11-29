@@ -1,9 +1,9 @@
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
 import config
-import pickle
-import csv
+
 
 # np.random.seed(42) #For having fixed values every time the code is run.
 
@@ -46,12 +46,6 @@ def generate_s_t(t, T, L, x, Lb, Tc, beta):
             s_i[l * 2 * Lb + Lb] = 1.0
         else:
             s_i[l * 2 * Lb] = 1.0
-
-    # print("length of s_i:", len(s_i))
-    s_i_2D = s_i.reshape(80,8)
-    # print("shape s_i_2D:", s_i_2D.shape)
-    s_i_reshape = complex_to_real_vector(s_i_2D)
-    # print("shape s_i_reshape:", s_i_reshape.shape)
 
     s_t_prime = np.zeros((len(s_i) * config.upsample))
     s_t_prime[:: config.upsample] = s_i
@@ -103,10 +97,10 @@ def channel_response(beta, Tc, v, sigma_0, tau_0, tau_c, Nc):
     tau_c = config.tau_c
     tau_0_dis = np.digitize(tau_0, upsampled_time)
     tau_c_dis = np.digitize(tau_c, upsampled_time)
-    
+
     h_t[tau_0_dis] = v * beta_0
     h_t[tau_c_dis] = beta_c
-    
+
     return h_t
 
 
@@ -116,7 +110,7 @@ def received_signal(s_t, h_t):
     return y
 
 
-def sample_received_signal(y, h):
+def sample_received_signal(y, h, st):
     first_nonzero = np.argwhere(np.abs(h))[0][0] #return the indices of non-zero elements
     # plt.plot(
     #     np.arange(len(y[first_nonzero:])) / config.upsample,
@@ -124,25 +118,66 @@ def sample_received_signal(y, h):
     #     "k--",
     # )
 
-    # print("!!!!!!!!!!!!!!!!!!", (len(y) - first_nonzero) % config.upsample)
     # Calculate if padding is needed
-    # if (len(y) - first_nonzero) % config.upsample != 0:
-    #     padding_length = config.upsample - ((len(y) - first_nonzero) % config.upsample)
-    #     y = np.pad(y, (0, padding_length), mode='constant')
-        
-    y = y[first_nonzero :: config.upsample]
-    # Calculate if padding is needed
-    if len(y) % config.upsample != 0:
-        padding_length = config.upsample - len(y) % config.upsample
+    if (len(y) - first_nonzero) % config.upsample != 0:
+        padding_length = config.upsample - ((len(y) - first_nonzero) % config.upsample)
         y = np.pad(y, (0, padding_length), mode='constant')
         
+    y_sampled = y[first_nonzero :: config.upsample]
     # plt.plot(np.abs(h))
     # plt.title(first_nonzero)
     # plt.show()
     # plt.stem(y.real)
-
     # plt.show()
-    return y
+
+    # print("length of y-sampled(i): ", len(y_sampled))
+
+    # #Plot y_sampled---------------
+    # plt.figure(8, figsize=(10, 6))
+    # # Real part
+    # plt.subplot(2, 1, 1)
+    # plt.plot(y_noisy.real, label="y_noisy")
+    # plt.scatter(np.arange(first_nonzero, len(y_noisy), 8), y_sampled.real, color='red', label="y_sampled")
+    # plt.title("y_Real")
+    # plt.legend()
+    # # Imaginary part
+    # plt.subplot(2, 1, 2)
+    # plt.plot(y_noisy.imag, label="y_noisy Imaginary")
+    # plt.scatter(np.arange(first_nonzero, len(y_noisy), 8), y_sampled.imag, color='red', label="y_sampled", s=20)
+    # plt.title("y_Imaginary")
+    # plt.xlabel("Time")
+    # plt.legend()
+    # #plt.show()
+
+    yl = y_sampled.reshape(config.L, 2*config.Lb)
+    # print("yl(i) shape: ", yl.shape)
+    yl_mapped = complex_to_real_vector(yl)
+    # print("yl_mapped shape: ", yl_mapped.shape)
+   
+
+    xl = st[ :: config.upsample].reshape(config.L, 2*config.Lb)
+    # print("xl(i) shape: ", xl.shape)
+    xl_mapped = complex_to_real_vector(xl)
+    # print("xl_mapped shape: ", xl_mapped.shape)
+
+
+    # plt.figure(figsize=(10, 3))
+    # plt.plot(yl_mapped[:, :8].real.flatten())
+    # plt.title("Real Parts of All Rows in yl_mapped")
+    plt.show()
+
+    return yl_mapped, xl_mapped
+
+
+def create_noise(num_noise_samples):
+    Eb = 1
+    SNR = 10  # SNR is given 10 dB
+    squared_norm_h = np.abs(h_t) ** 2  #|h|^2
+    average_squared_norm_h = np.mean(squared_norm_h)
+    N0B = (average_squared_norm_h * Eb) / SNR
+    # print(f"_____N0B: {N0B}")
+    noise = np.random.normal(0, np.sqrt(N0B), num_noise_samples) + 1j * np.random.normal(0, np.sqrt(N0B), num_noise_samples)
+    return noise
 
 
 def complex_to_real_vector(yl):
@@ -150,20 +185,29 @@ def complex_to_real_vector(yl):
     for row in yl:
         real_part = row.real
         imag_part = row.imag
-        row_concat = np.concatenate((real_part,imag_part)).reshape(16)
+        row_concat = np.concatenate((real_part,imag_part))
 
         y_mapped.append(row_concat)
     
     return np.array(y_mapped)
 
 
-def generate_y(x, v):
 
-    # Create signals---
+
+#------------------main------------------
+num_round = 100000
+multiple_tuples=[]
+
+for r in range(num_round):
+    x = np.random.binomial(n=1, p=0.5, size=config.L)  # np.random.randint(0, 2, L), x ∈ {0,1}
+    v = np.random.binomial(n=1, p=0.5)  # Target presence: Bernoulli(0.5)
+
+    #create signals---
     t, s_t = generate_s_t(
-        config.t, config.T, config.L, config.x, config.Lb, config.Tc, config.beta
+        config.t, config.T, config.L, x, config.Lb, config.Tc, config.beta
     )
-    # print("length of s(t):", len(s_t))  
+    # print("length of s(t):", len(s_t))
+
 
     h_t = channel_response(
         config.beta,
@@ -176,9 +220,10 @@ def generate_y(x, v):
     )
     # print("length of h(t):", len(h_t))
 
+
     y_t = received_signal(s_t, h_t)
     # print("length of y(t):", len(y_t))
-    time_y = np.arange(len(y_t))
+
 
     # plt.plot((config.Tc / config.upsample) * np.arange(len(s_t)), s_t.real, label = "s(t)")
     # plt.plot((config.Tc / config.upsample) * np.arange(len(h_t)), np.abs(h_t), label = "h(t)")
@@ -186,81 +231,17 @@ def generate_y(x, v):
     # plt.legend()
     # plt.show()
 
+
     # Add noise to y(t)--------
-    Eb = 1
-    SNR = 10  # SNR is given 10 dB
-    squared_norm_h = np.abs(h_t) ** 2  #|h|^2
-    average_squared_norm_h = np.mean(squared_norm_h)
-    N0B = (average_squared_norm_h * Eb) / SNR
-    # print(f"_____N0B: {N0B}")
-
-    num_noise_samples = len(y_t)
-    z = np.random.normal(0, np.sqrt(N0B), num_noise_samples) + 1j * np.random.normal(0, np.sqrt(N0B), num_noise_samples)
+    z = create_noise(len(y_t))
     y_noisy = y_t + z
-    # print("length of y_noisy:", len(y_noisy))
-
-    # #Plot y_noisy---------------
-    # #real-------
-    # plt.figure(8, figsize=(10, 6))
-    # plt.subplot(2, 1, 1)
-    # plt.plot(y_noisy.real)
-    # plt.title("y_noisy_Real")
-    # #imaginary---
-    # plt.subplot(2, 1, 2)
-    # plt.plot(y_noisy.imag)
-    # plt.title("y_noisy_Imaginary")
-    # plt.xlabel("Time")
-    # # plt.show()
 
 
-    # Sampling of y(t)-----------
-    y_sampled = sample_received_signal(y_noisy, h_t)
-    # print("length of y-sampled(i): ", len(y_sampled))
-    # #Plot y_sampled---------------
-    # #real-------
-    # plt.figure(8, figsize=(10, 6))
-    # plt.subplot(2, 1, 1)
-    # plt.plot(y_sampled.real)
-    # plt.title("y_noisy_Real")
-    # #imaginary---
-    # plt.subplot(2, 1, 2)
-    # plt.plot(y_sampled.imag)
-    # plt.title("y_noisy_Imaginary")
-    # plt.xlabel("Time")
-    # # plt.show()
+    # Downsample the y(t)------
+    y, x = sample_received_signal(y_noisy, h_t, s_t)
 
-    yl = y_sampled.reshape(config.L, 2*config.Lb)
-    # print("yl(i) shape: ", yl.shape)
-    # print(yl)
-    yl_mapped = complex_to_real_vector(yl)
-    # print("yl_mapped shape: ", yl_mapped.shape)
-    # print(yl_mapped)
-
-    # yl_mapped_real = yl_mapped[:, :8].real.flatten()
-    # plt.figure(figsize=(10, 3))
-    # plt.plot(yl_mapped_real)
-    # plt.title("Real Parts of All Rows in yl_mapped")
-    # plt.show()
-
-    return yl_mapped
-
-
-
-# -----------------main------------------
-num_round = 5 #100000
-multiple_tuples=[]
-
-for r in range(num_round):
-    x = np.random.binomial(n=1, p=0.5, size=config.L)  # np.random.randint(0, 2, L), x ∈ {0,1}
-    v = np.random.binomial(n=1, p=0.5)  # Target presence: Bernoulli(0.5)
-    y = generate_y(x, v)
-
-    print("round# :", r, "\n v : ", v)
-    x_reshape= np.zeros((80,16))
-    x_reshape[:, 0]= config.x
-    #print("x_reshape: ", x_reshape.shape)
-
-    multiple_tuples.append((y,x_reshape,v))
+    print("round# :", r, " v : ", v)
+    multiple_tuples.append((y,x,v))
 
 # # Print each tuple---
 # for i, t in enumerate(multiple_tuples):
@@ -268,17 +249,15 @@ for r in range(num_round):
 #     print(f"y (shape {t[0].shape}):\n{t[0]}")
 #     print(f"x (shape {t[1].shape}):\n{t[1]}")
 #     print(f"v: {t[2]}\n")
-    
+# print(multiple_tuples)
 
 #Create dataset---------------
-with open("./multiple_tuples_5.pkl", "wb") as f:
+with open("./dataset.pkl", "wb") as f:
     pickle.dump(multiple_tuples, f)
 
-
 # Load the dataset
-with open("./multiple_tuples_5.pkl", "rb") as f:
+with open("./dataset.pkl", "rb") as f:
     loaded_tuples = pickle.load(f)
-
 
 #plot dataset----
 y_test, x_test, v_test = loaded_tuples[3]
@@ -287,9 +266,13 @@ y_test_real = y_test[:, :8].real.flatten()
 plt.figure(figsize=(10, 6))
 plt.plot(y_test_real, label="y")
 plt.stem( x_test[:, :8].flatten(), label="x", linefmt="red", markerfmt="ro", basefmt="r-")
-plt.title(f"5th Row of y and x (v = {v_test})")
+plt.title(f"Third element of the tuple, v = {v_test}")
 plt.legend()
 plt.show()
+
+
+
+
 
 
 
