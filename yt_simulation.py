@@ -1,9 +1,9 @@
-import csv
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
 import config
-
+import pickle
+import csv
 
 # np.random.seed(42) #For having fixed values every time the code is run.
 
@@ -47,11 +47,11 @@ def generate_s_t(t, T, L, x, Lb, Tc, beta):
         else:
             s_i[l * 2 * Lb] = 1.0
 
-    print("length of s_i:", len(s_i))
+    # print("length of s_i:", len(s_i))
     s_i_2D = s_i.reshape(80,8)
-    print("shape s_i_2D:", s_i_2D.shape)
+    # print("shape s_i_2D:", s_i_2D.shape)
     s_i_reshape = complex_to_real_vector(s_i_2D)
-    print("shape s_i_reshape:", s_i_reshape.shape)
+    # print("shape s_i_reshape:", s_i_reshape.shape)
 
     s_t_prime = np.zeros((len(s_i) * config.upsample))
     s_t_prime[:: config.upsample] = s_i
@@ -91,8 +91,8 @@ def channel_response(beta, Tc, v, sigma_0, tau_0, tau_c, Nc):
 
     beta_0 = generate_complex_gaussian(1, mean=0, variance=1)
     beta_c = generate_complex_gaussian(Nc, mean=0, variance=sigma_0)
-    print("B0: ", beta_0)
-    print("Bc: ", beta_c)
+    # print("B0: ", beta_0)
+    # print("Bc: ", beta_c)
 
     h_t = np.zeros(config.channel_samples, dtype = complex)
 
@@ -163,7 +163,7 @@ def generate_y(x, v):
     t, s_t = generate_s_t(
         config.t, config.T, config.L, config.x, config.Lb, config.Tc, config.beta
     )
-    print("length of s(t):", len(s_t))  
+    # print("length of s(t):", len(s_t))  
 
     h_t = channel_response(
         config.beta,
@@ -174,10 +174,10 @@ def generate_y(x, v):
         config.tau_c,
         config.Nc,
     )
-    print("length of h(t):", len(h_t))
+    # print("length of h(t):", len(h_t))
 
     y_t = received_signal(s_t, h_t)
-    print("length of y(t):", len(y_t))
+    # print("length of y(t):", len(y_t))
     time_y = np.arange(len(y_t))
 
     # plt.plot((config.Tc / config.upsample) * np.arange(len(s_t)), s_t.real, label = "s(t)")
@@ -192,12 +192,12 @@ def generate_y(x, v):
     squared_norm_h = np.abs(h_t) ** 2  #|h|^2
     average_squared_norm_h = np.mean(squared_norm_h)
     N0B = (average_squared_norm_h * Eb) / SNR
-    print(f"_____N0B: {N0B}")
+    # print(f"_____N0B: {N0B}")
 
     num_noise_samples = len(y_t)
     z = np.random.normal(0, np.sqrt(N0B), num_noise_samples) + 1j * np.random.normal(0, np.sqrt(N0B), num_noise_samples)
     y_noisy = y_t + z
-    print("length of y_noisy:", len(y_noisy))
+    # print("length of y_noisy:", len(y_noisy))
 
     # #Plot y_noisy---------------
     # #real-------
@@ -215,7 +215,7 @@ def generate_y(x, v):
 
     # Sampling of y(t)-----------
     y_sampled = sample_received_signal(y_noisy, h_t)
-    print("length of y-sampled(i): ", len(y_sampled))
+    # print("length of y-sampled(i): ", len(y_sampled))
     # #Plot y_sampled---------------
     # #real-------
     # plt.figure(8, figsize=(10, 6))
@@ -230,10 +230,10 @@ def generate_y(x, v):
     # # plt.show()
 
     yl = y_sampled.reshape(config.L, 2*config.Lb)
-    print("yl(i) shape: ", yl.shape)
+    # print("yl(i) shape: ", yl.shape)
     # print(yl)
     yl_mapped = complex_to_real_vector(yl)
-    print("yl_mapped shape: ", yl_mapped.shape)
+    # print("yl_mapped shape: ", yl_mapped.shape)
     # print(yl_mapped)
 
     # yl_mapped_real = yl_mapped[:, :8].real.flatten()
@@ -271,21 +271,25 @@ for r in range(num_round):
     
 
 #Create dataset---------------
-with open("./dataset.csv", "w", newline="") as f:
-    writer = csv.writer(f)
-    for y, x, v in multiple_tuples:
-        writer.writerow([y.tolist() if hasattr(y, "tolist") else y,
-                         x.tolist() if hasattr(x, "tolist") else x,
-                         v])
-
-# Load from the CSV file (basic loading; adjust as needed)
-with open("./dataset.csv", "r") as f:
-    reader = csv.reader(f)
-    loaded_tuples = [row for row in reader]
-
-print(loaded_tuples[7:11])
+with open("./multiple_tuples_5.pkl", "wb") as f:
+    pickle.dump(multiple_tuples, f)
 
 
+# Load the dataset
+with open("./multiple_tuples_5.pkl", "rb") as f:
+    loaded_tuples = pickle.load(f)
+
+
+#plot dataset----
+y_test, x_test, v_test = loaded_tuples[3]
+print(y_test.shape, x_test.shape, v_test)
+y_test_real = y_test[:, :8].real.flatten()
+plt.figure(figsize=(10, 6))
+plt.plot(y_test_real, label="y")
+plt.stem( x_test[:, :8].flatten(), label="x", linefmt="red", markerfmt="ro", basefmt="r-")
+plt.title(f"5th Row of y and x (v = {v_test})")
+plt.legend()
+plt.show()
 
 
 
