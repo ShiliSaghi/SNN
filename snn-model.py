@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
+from snntorch import functional as SF
 
 dtype = torch.float
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
@@ -65,11 +66,18 @@ train_loader = DataLoader(train_dataset, batch_size=128 , shuffle=True, drop_las
 test_loader = DataLoader(test_dataset, batch_size=128, shuffle= True, drop_last= True)
 
 
+import pandas as pd
+print("Class distribution in the original training dataset:", pd.Series(train_dataset.labels).value_counts())
+print("Class distribution in the original testing dataset:", pd.Series(test_dataset.labels).value_counts())
+
 for y, x, label in train_loader:
     print(f"Batch y shape: {y.shape}")
     print(f"Batch x shape: {x.shape}")
     print(f"Batch labels shape: {label.shape}")
     break  # Just check the first batch
+
+
+
 
 #layer parameters
 Ny=32
@@ -110,14 +118,14 @@ class Net(nn.Module):
         spk2_rec = []
 
         for step in range(num_steps):                         #Loop over 80 time steps
-            cur_y = self.fc_y(y[step])   
+            cur_y = self.fc_y(y[step])
             spk_y, mem_y = self.lif_y(cur_y, mem_y)
-            cur_x = self.fc_x(x[step])   
+            cur_x = self.fc_x(x[step])
             spk_x, mem_x = self.lif_x(cur_x, mem_x)
 
             combined_input = torch.cat((spk_y, spk_x), dim=1) #Shape:[batch_size:128, Ny + Nx:64]
-            
-            cur1 = self.fc1(combined_input)           
+
+            cur1 = self.fc1(combined_input)
             spk1, mem1 = self.lif1(cur1, mem1)                #torch.Size([128, 256])
             cur2 = self.fc2(spk1)
             spk2, mem2 = self.lif2(cur2, mem2)                #torch.Size([128, 1])
@@ -129,26 +137,25 @@ class Net(nn.Module):
 # Load the network onto CUDA if available
 net = Net().to(device)
 
+
+
 def print_batch_accuracy(dataY, dataX, targets, train=False):
     output, _ = net(dataY, dataX)  #[80, 128, 1]
+pred = (output.sum(dim=0) > num_steps / 2).float()
+    acc = (pred == targets).float().mean().item()
 
-    # _, idx = output.sum(dim=0).max(1) #Returns a tuple: maximum value, index of the max value
-    # acc = np.mean((targets == idx).detach().cpu().numpy())
-    # # print(f"idx shape: {idx.shape}")  #torch.Size([128])
 
-    pred = (output.sum(dim=0) > 0).float()  # Binary predictions: 0 or 1
-    correct = (pred.squeeze() == targets.float()).sum().item()
-    total = targets.size(0)
-    acc = correct / total
-    print(f"Total size: {total}, Correct_Prediction: {correct}")
     if train:
         print(f"Train set accuracy for a single minibatch: {acc*100:.2f}%")
     else:
         print(f"Test set accuracy for a single minibatch: {acc*100:.2f}%")
 
+    return acc
 
-loss = nn.BCEWithLogitsLoss() #CrossEntropyLoss()
+
+loss = nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(net.parameters(), lr=5e-4, betas=(0.9, 0.999))
+
 
 
 #Train loop
@@ -162,6 +169,8 @@ epoch_test_loss = []
 # lossMax_iter=[]
 lossMin_epoch=[]
 lossMax_epoch=[]
+train_acc_hist = []
+test_acc_hist = []
 
 
 # Outer training loop
@@ -193,10 +202,7 @@ for epoch in range(num_epochs):
         loss_val = torch.zeros((1), dtype=dtype, device=device)
         for step in range(num_steps):
             loss_val += loss(mem_rec[step], targets2) #mem_rec[step].shape = [128,1], target.shape = (128,1)
-
-        # loss_val = loss(mem_rec[-1], targets2)
-
-
+            
         # Gradient calculation + weight update
         optimizer.zero_grad()
         loss_val.backward()
@@ -237,9 +243,13 @@ for epoch in range(num_epochs):
                 print(f"Epoch {epoch+1}, Iteration {iter_counter}")
                 print(f"Train Set Loss: {loss_val}")
                 print(f"Test Set Loss: {test_loss}")
-                print_batch_accuracy(y, x, targets, train=True)
-                print_batch_accuracy(test_y, test_x, test_targets, train=False)
+                train_acc = print_batch_accuracy(y, x, targets2, train=True)
+                test_acc = print_batch_accuracy(test_y, test_x, test_targets2, train=False)
                 print("\n")
+
+                train_acc_hist.append(train_acc)
+                test_acc_hist.append(test_acc)
+
 
             counter += 1
             iter_counter +=1
@@ -282,10 +292,18 @@ plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.show()
 
+# Plot acc
+fig = plt.figure(facecolor="w", figsize=(10, 5))
+plt.plot(train_acc_hist, label='Train acc (epoch)')
+plt.plot(test_acc_hist, label='test acc (epoch)')
+plt.title("Accuracy Curves")
+plt.legend()
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.show()
 
 
-
-# drop_last switched to False to keep all samples
+#Test whole testdata, drop_last switched to False to keep all samples
 total = 0
 correct = 0
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
@@ -309,15 +327,14 @@ with torch.no_grad():
     total_loss += batch_loss.item()
 
     # Calculate predictions and accuracy
-    predicted = (test_spk.sum(dim=0) > 0).float()
-    correct += (predicted.squeeze() == target_t.float()).sum().item()
-   
+    # pred = (output.sum(dim=0) > num_steps / 2).float()
+    # acc = (pred == targets).float().mean().item()
+
+    predicted = (test_spk.sum(dim=0) > num_steps / 2).float() 
+    correct += (predicted == targets).float().sum().item()
+
     total += targets.size(0)
 
 print(f"Total size: {total}, Correct_Prediction: {correct}")
 print(f"Test Set Accuracy: {100 * correct / total}%")
 print(f"Average Test Loss: {total_loss / len(test_loader):.4f}")
-
-
-
-
